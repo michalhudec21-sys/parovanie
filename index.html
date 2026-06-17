@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Párovanie položiek so skenerom</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1100px;
+      margin: 30px auto;
+      padding: 20px;
+      background: #f5f5f5;
+      color: #222;
+    }
+
+    h1 { margin-bottom: 10px; }
+    h2 { margin-top: 0; }
+
+    .box {
+      background: white;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 170px;
+      font-size: 16px;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      resize: vertical;
+    }
+
+    button {
+      padding: 11px 18px;
+      margin: 8px 8px 8px 0;
+      cursor: pointer;
+      border: none;
+      border-radius: 7px;
+      background: #2563eb;
+      color: white;
+      font-size: 15px;
+    }
+
+    button:hover { opacity: 0.92; }
+    button.secondary { background: #555; }
+    button.danger { background: #b91c1c; }
+    button.success { background: #15803d; }
+    button:disabled { background: #999; cursor: not-allowed; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      margin-top: 10px;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+    }
+
+    th {
+      background: #222;
+      color: white;
+      text-align: left;
+    }
+
+    .not-found {
+      background: #ffe0e0;
+      color: #9b0000;
+      font-weight: bold;
+    }
+
+    .info {
+      color: #555;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .scanner-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: rgba(0, 0, 0, 0.92);
+      color: white;
+      padding: 14px;
+      overflow: auto;
+    }
+
+    .scanner-modal.active {
+      display: block;
+    }
+
+    .scanner-panel {
+      width: min(720px, 100%);
+      margin: 0 auto;
+      background: #111827;
+      border-radius: 14px;
+      padding: 16px;
+      box-shadow: 0 0 30px rgba(0,0,0,0.45);
+    }
+
+    .scanner-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .scanner-header h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    #reader {
+      width: 100%;
+      overflow: hidden;
+      border-radius: 12px;
+      background: #000;
+    }
+
+    #reader video {
+      border-radius: 12px;
+    }
+
+    .detected-box {
+      margin: 14px 0 6px;
+      padding: 14px;
+      border-radius: 10px;
+      background: #1f2937;
+      border: 1px solid #374151;
+      min-height: 62px;
+    }
+
+    .detected-label {
+      font-size: 13px;
+      color: #cbd5e1;
+      margin-bottom: 5px;
+    }
+
+    .detected-code {
+      font-size: 26px;
+      font-weight: bold;
+      color: #9ca3af;
+      word-break: break-all;
+    }
+
+    .detected-code.good {
+      color: #22c55e;
+      text-shadow: 0 0 10px rgba(34,197,94,0.35);
+    }
+
+    .scan-ok-flash {
+      animation: okFlash 0.55s ease-out;
+    }
+
+    @keyframes okFlash {
+      0% { background: #14532d; border-color: #22c55e; }
+      100% { background: #1f2937; border-color: #374151; }
+    }
+
+    .scanner-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .small-note {
+      font-size: 13px;
+      color: #d1d5db;
+      margin-top: 10px;
+      line-height: 1.35;
+    }
+
+    .count-line {
+      margin-top: 6px;
+      color: #16a34a;
+      font-weight: bold;
+    }
+
+    @media (max-width: 700px) {
+      body {
+        margin: 0;
+        padding: 12px;
+      }
+
+      .box {
+        padding: 14px;
+      }
+
+      button {
+        width: 100%;
+        margin-right: 0;
+      }
+
+      .scanner-modal {
+        padding: 0;
+      }
+
+      .scanner-panel {
+        min-height: 100vh;
+        border-radius: 0;
+      }
+
+      .scanner-header h2 {
+        font-size: 18px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Párovanie položiek podľa kódu</h1>
+
+  <div class="box">
+    <h2>1. Nahraj zdrojový zoznam</h2>
+    <p class="info">
+      Excel musí mať v prvom stĺpci kód položky a v druhom stĺpci názov položky.
+      Hlavička môže byť použitá.
+    </p>
+    <input type="file" id="sourceFile" accept=".xlsx,.xls,.csv" />
+    <p id="sourceStatus">Zdrojový zoznam nie je načítaný.</p>
+  </div>
+
+  <div class="box">
+    <h2>2. Zadaj alebo naskenuj kódy položiek</h2>
+    <p class="info">
+      Každý kód je na samostatnom riadku. Pri skenovaní sa kód najprv zobrazí zelenou farbou a až po kliknutí sa pridá do zoznamu.
+    </p>
+
+    <button class="success" onclick="openScanner()">Skenovať QR / čiarový kód</button>
+
+    <textarea id="codesInput" placeholder="1001&#10;1002&#10;1003"></textarea>
+    <p id="scanCount" class="count-line"></p>
+
+    <button onclick="matchItems()">Spárovať</button>
+    <button class="secondary" onclick="clearInput()">Vymazať vstup</button>
+    <button class="danger" onclick="clearAll()">Vymazať všetko</button>
+  </div>
+
+  <div class="box">
+    <h2>3. Výsledok</h2>
+    <button onclick="exportXLSX()">Export XLSX</button>
+
+    <table id="resultTable">
+      <thead>
+        <tr>
+          <th>Poradie</th>
+          <th>Kód</th>
+          <th>Názov</th>
+          <th>Stav</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <div id="scannerModal" class="scanner-modal">
+    <div class="scanner-panel">
+      <div class="scanner-header">
+        <h2>Skener kódu</h2>
+        <button class="danger" onclick="closeScanner()">Zavrieť</button>
+      </div>
+
+      <div id="reader"></div>
+
+      <div id="detectedBox" class="detected-box">
+        <div class="detected-label">Rozpoznaný kód:</div>
+        <div id="detectedCode" class="detected-code">Zatiaľ nič</div>
+      </div>
+
+      <div class="scanner-actions">
+        <button id="addDetectedBtn" class="success" onclick="addDetectedCode()" disabled>Pridať tento kód do zoznamu</button>
+        <button class="secondary" onclick="clearDetectedCode()">Vyčistiť rozpoznaný kód</button>
+      </div>
+
+      <div class="small-note">
+        Namier kameru na QR alebo čiarový kód. Aplikácia ho rozpozná automaticky, ale do zoznamu sa pridá až po tvojom kliknutí.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let sourceMap = {};
+    let resultData = [];
+    let html5QrCode = null;
+    let lastDetectedCode = "";
+    let addedCount = 0;
+    let lastScanValue = "";
+    let lastScanTime = 0;
+
+    document.getElementById("sourceFile").addEventListener("change", handleSourceFile);
+
+    function normalizeCode(value) {
+      if (value === undefined || value === null) return "";
+      return String(value).trim();
+    }
+
+    function cleanScannedValue(value) {
+      let text = normalizeCode(value);
+
+      // Ak QR obsahuje napr. KOD=100345, vezme sa hodnota za =.
+      if (text.includes("=")) {
+        const parts = text.split("=");
+        text = parts[parts.length - 1].trim();
+      }
+
+      // Ak QR obsahuje viac údajov oddelených bodkočiarkou, vezme sa prvá časť.
+      if (text.includes(";")) {
+        text = text.split(";")[0].trim();
+      }
+
+      return text;
+    }
+
+    function handleSourceFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const firstSheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[firstSheetName];
+
+        const rows = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: ""
+        });
+
+        sourceMap = {};
+
+        rows.forEach((row, index) => {
+          const code = normalizeCode(row[0]);
+          const name = String(row[1] ?? "").trim();
+
+          if (!code || !name) return;
+
+          const lowerCode = code.toLowerCase();
+          const lowerName = name.toLowerCase();
+
+          if (
+            index === 0 &&
+            (
+              lowerCode.includes("kód") ||
+              lowerCode.includes("kod") ||
+              lowerCode.includes("číslo") ||
+              lowerCode.includes("cislo")
+            ) &&
+            (
+              lowerName.includes("názov") ||
+              lowerName.includes("nazov") ||
+              lowerName.includes("popis")
+            )
+          ) {
+            return;
+          }
+
+          sourceMap[code] = name;
+        });
+
+        document.getElementById("sourceStatus").textContent =
+          "Načítaných položiek: " + Object.keys(sourceMap).length;
+      };
+
+      reader.readAsArrayBuffer(file);
+    }
+
+    function matchItems() {
+      const tbody = document.querySelector("#resultTable tbody");
+      tbody.innerHTML = "";
+      resultData = [];
+
+      const input = document.getElementById("codesInput").value;
+      const codes = input
+        .split(/\r?\n/)
+        .map(code => normalizeCode(code))
+        .filter(code => code !== "");
+
+      codes.forEach((code, index) => {
+        const name = sourceMap[code];
+        const found = name !== undefined;
+
+        const item = {
+          Poradie: index + 1,
+          Kód: code,
+          Názov: found ? name : "",
+          Stav: found ? "Nájdené" : "Nenájdené"
+        };
+
+        resultData.push(item);
+
+        const tr = document.createElement("tr");
+        if (!found) tr.classList.add("not-found");
+
+        tr.innerHTML = `
+          <td>${item.Poradie}</td>
+          <td>${escapeHTML(item.Kód)}</td>
+          <td>${escapeHTML(item.Názov)}</td>
+          <td>${item.Stav}</td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function exportXLSX() {
+      if (resultData.length === 0) {
+        alert("Najprv spáruj položky.");
+        return;
+      }
+
+      const worksheet = XLSX.utils.json_to_sheet(resultData);
+      worksheet["!cols"] = [
+        { wch: 10 },
+        { wch: 18 },
+        { wch: 45 },
+        { wch: 14 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Vysledok");
+      XLSX.writeFile(workbook, "sparovane_polozky.xlsx");
+    }
+
+    function clearInput() {
+      document.getElementById("codesInput").value = "";
+      document.querySelector("#resultTable tbody").innerHTML = "";
+      resultData = [];
+      addedCount = 0;
+      updateScanCount();
+    }
+
+    function clearAll() {
+      sourceMap = {};
+      resultData = [];
+      addedCount = 0;
+      lastDetectedCode = "";
+      document.getElementById("codesInput").value = "";
+      document.getElementById("sourceFile").value = "";
+      document.getElementById("sourceStatus").textContent =
+        "Zdrojový zoznam nie je načítaný.";
+      document.querySelector("#resultTable tbody").innerHTML = "";
+      updateDetectedDisplay();
+      updateScanCount();
+    }
+
+    async function openScanner() {
+      document.getElementById("scannerModal").classList.add("active");
+      clearDetectedCode();
+
+      if (html5QrCode) {
+        return;
+      }
+
+      html5QrCode = new Html5Qrcode("reader");
+
+      const config = {
+        fps: 10,
+        qrbox: function(viewfinderWidth, viewfinderHeight) {
+          const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+          const size = Math.floor(minEdge * 0.72);
+          return { width: size, height: size };
+        },
+        rememberLastUsedCamera: true,
+        supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA]
+      };
+
+      try {
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          onScanSuccess,
+          onScanFailure
+        );
+      } catch (err) {
+        alert("Kameru sa nepodarilo spustiť. Skús povoliť kameru alebo otvoriť aplikáciu cez HTTPS / localhost.");
+        console.error(err);
+      }
+    }
+
+    async function closeScanner() {
+      document.getElementById("scannerModal").classList.remove("active");
+
+      if (html5QrCode) {
+        try {
+          await html5QrCode.stop();
+          await html5QrCode.clear();
+        } catch (err) {
+          console.warn("Skener sa nepodarilo korektne zastaviť:", err);
+        }
+        html5QrCode = null;
+      }
+    }
+
+    function onScanSuccess(decodedText) {
+      const cleaned = cleanScannedValue(decodedText);
+      if (!cleaned) return;
+
+      const now = Date.now();
+      if (cleaned === lastScanValue && now - lastScanTime < 700) {
+        return;
+      }
+
+      lastScanValue = cleaned;
+      lastScanTime = now;
+      lastDetectedCode = cleaned;
+      updateDetectedDisplay(true);
+    }
+
+    function onScanFailure(errorMessage) {
+      // Bežné priebežné neúspešné čítania ignorujeme.
+    }
+
+    function addDetectedCode() {
+      const code = normalizeCode(lastDetectedCode);
+      if (!code) return;
+
+      const textarea = document.getElementById("codesInput");
+      const current = textarea.value.trim();
+
+      textarea.value = current ? current + "\n" + code : code;
+      addedCount++;
+      updateScanCount();
+
+      const btn = document.getElementById("addDetectedBtn");
+      btn.textContent = "Pridané ✓";
+      setTimeout(() => {
+        btn.textContent = "Pridať tento kód do zoznamu";
+      }, 650);
+    }
+
+    function clearDetectedCode() {
+      lastDetectedCode = "";
+      updateDetectedDisplay(false);
+    }
+
+    function updateDetectedDisplay(flash = false) {
+      const detectedBox = document.getElementById("detectedBox");
+      const detectedCode = document.getElementById("detectedCode");
+      const addBtn = document.getElementById("addDetectedBtn");
+
+      if (lastDetectedCode) {
+        detectedCode.textContent = lastDetectedCode;
+        detectedCode.classList.add("good");
+        addBtn.disabled = false;
+      } else {
+        detectedCode.textContent = "Zatiaľ nič";
+        detectedCode.classList.remove("good");
+        addBtn.disabled = true;
+      }
+
+      if (flash) {
+        detectedBox.classList.remove("scan-ok-flash");
+        void detectedBox.offsetWidth;
+        detectedBox.classList.add("scan-ok-flash");
+      }
+    }
+
+    function updateScanCount() {
+      const el = document.getElementById("scanCount");
+      if (addedCount > 0) {
+        el.textContent = "Naskenované a pridané kódy: " + addedCount;
+      } else {
+        el.textContent = "";
+      }
+    }
+
+    function escapeHTML(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+  </script>
+</body>
+</html>
